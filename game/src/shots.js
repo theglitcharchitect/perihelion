@@ -1,4 +1,4 @@
-// Deterministic screenshot scenes (?shot=title|battle|nova|dawn&seed=N) and
+// Deterministic screenshot scenes (?shot=title|battle|nova|extinguished&seed=N) and
 // the autopilot that flies the skiff inside them. The scenes are composed
 // with a seeded world and rendered by the game's own code, so a screenshot
 // is the real game at a chosen moment, never a mockup. The autopilot also
@@ -105,7 +105,7 @@ export function setupShotScene(game, name) {
 
   if (name === 'title') {
     game.state = 'title';
-    // A quiet fall drifting behind the title, recycled by main.js.
+    // A quiet fall drifting behind the title, recycled by game.js.
     for (let i = 0; i < 7; i++) {
       const point = game.director.spawnPoint();
       const shard = makeShard(game.rng.pick(['shard', 'shard', 'weaver', 'splitter']), point.x, point.y, game.rng, 0.6);
@@ -117,6 +117,7 @@ export function setupShotScene(game, name) {
   game.state = 'playing';
   game.ship.x = VIEW.coreX - 205;
   game.ship.y = VIEW.coreY + 128;
+  game.ship.invulnerable = 999; // scenes compose action, not damage flashes
   game.director.wave = 5;
 
   if (name === 'battle' || name === 'nova') {
@@ -138,15 +139,19 @@ export function setupShotScene(game, name) {
     return;
   }
 
-  if (name === 'dawn') {
-    game.state = 'won';
-    game.score = 18450;
-    game.kills = 132;
-    game.bestMultiplier = 5;
-    game.elapsed = 486;
-    game.heart = 43;
-    game.director.wave = 8;
+  if (name === 'extinguished') {
+    // The defeat screen over a dark Heart, with the fall still coming down:
+    // the sheet shows the lose condition as plainly as the win.
+    game.state = 'lost';
+    game.lostReason = 'heart';
+    game.score = 11240;
+    game.kills = 87;
+    game.bestMultiplier = 4;
+    game.elapsed = 372;
+    game.heart = 0;
+    game.director.wave = 6;
     game.bestScore = 18450;
+    composeFall(game, ['shard', 'weaver', 'shard', 'splitter', 'dart', 'shard'], 300, 560);
     return;
   }
 

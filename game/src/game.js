@@ -6,6 +6,7 @@
 // render.js draws, particles.js reports every hit in light.
 
 import { COMBO, HEART, NOVA, SHIP, VIEW, WAVE_CLEAR_BONUS } from './config.js';
+import { BOONS, cardRect, pickBoons } from './boons.js';
 import { Input } from './input.js';
 import { Particles } from './particles.js';
 import { makeBackground, drawGame } from './render.js';
@@ -45,8 +46,14 @@ class Game {
     this.novaMax = NOVA.maxCharges;
     this.cellsCollected = 0;
     this.plasmaFed = 0;
+    // Run modifiers, changed only by boons: multipliers on fire rate, nova
+    // radius, plasma magnet and thrust, plus how often plasma mends.
+    this.mods = { fireRate: 1, novaRadius: 1, magnet: 1, thrust: 1 };
+    this.mendEvery = HEART.cellRepairEvery;
+    this.boonsTaken = [];
+    this.draft = [];
     this.nova = { active: false, t: 0, hit: new Set() };
-    this.phase = 'falling'; // falling | intermission
+    this.phase = 'falling'; // falling | draft
     this.interT = 0;
     this.bannerText = '';
     this.bannerSub = '';
@@ -98,6 +105,10 @@ class Game {
     this.novaCharges = NOVA.startCharges;
     this.cellsCollected = 0;
     this.plasmaFed = 0;
+    this.mods = { fireRate: 1, novaRadius: 1, magnet: 1, thrust: 1 };
+    this.mendEvery = HEART.cellRepairEvery;
+    this.boonsTaken = [];
+    this.draft = [];
     this.nova.active = false;
     this.elapsed = 0;
     this.sceneTime = 0;
@@ -221,7 +232,7 @@ class Game {
   }
 
   mendHeart() {
-    if (this.plasmaFed % HEART.cellRepairEvery === 0 && this.heart > 0) {
+    if (this.plasmaFed % this.mendEvery === 0 && this.heart > 0) {
       this.heart = Math.min(HEART.integrity, this.heart + HEART.repairAmount);
     }
   }
@@ -232,8 +243,9 @@ class Game {
     this.nova.active = true;
     this.nova.t = 0;
     this.nova.hit = new Set();
-    this.particles.ring(this.ship.x, this.ship.y, '#9df2ff', NOVA.radius, 5, NOVA.expandTime + 0.15);
-    this.particles.ring(this.ship.x, this.ship.y, '#e8fbff', NOVA.radius * 0.72, 3, NOVA.expandTime);
+    const novaR = NOVA.radius * this.mods.novaRadius;
+    this.particles.ring(this.ship.x, this.ship.y, '#9df2ff', novaR, 5, NOVA.expandTime + 0.15);
+    this.particles.ring(this.ship.x, this.ship.y, '#e8fbff', novaR * 0.72, 3, NOVA.expandTime);
     this.particles.burst(this.ship.x, this.ship.y, '#9df2ff', 16, 300, 0.4, 2);
     this.shake = Math.min(1, this.shake + 0.3);
   }
@@ -241,6 +253,10 @@ class Game {
   // --- simulation ----------------------------------------------------------
 
   updatePlaying(dt) {
+    if (this.phase === 'draft') {
+      this.updateDraft();
+      return;
+    }
     this.elapsed += dt;
     this.sceneTime += dt;
     const control = this.autopilot || this.input;
@@ -248,10 +264,10 @@ class Game {
 
     for (const shard of this.director.update(dt)) this.shards.push(shard);
 
-    updateShip(this.ship, control, dt);
+    updateShip(this.ship, control, dt, this.mods);
     if ((control.mouseDown || control.down('KeyF')) && this.ship.fireTimer <= 0 && this.ship.alive) {
       this.bolts.push(makeBolt(this.ship));
-      this.ship.fireTimer = SHIP.fireCooldown;
+      this.ship.fireTimer = SHIP.fireCooldown / this.mods.fireRate;
       this.ship.vx -= Math.cos(this.ship.angle) * 9;
       this.ship.vy -= Math.sin(this.ship.angle) * 9;
     }
@@ -260,7 +276,7 @@ class Game {
     // Nova expansion: a widening band that breaks what it crosses.
     if (this.nova.active) {
       this.nova.t += dt;
-      const radius = NOVA.radius * (1 - Math.pow(1 - Math.min(1, this.nova.t / NOVA.expandTime), 2));
+      const radius = NOVA.radius * this.mods.novaRadius * (1 - Math.pow(1 - Math.min(1, this.nova.t / NOVA.expandTime), 2));
       for (const shard of this.shards) {
         const d = Math.hypot(shard.x - this.ship.x, shard.y - this.ship.y);
         if (d < radius && !this.nova.hit.has(shard.id)) {
@@ -326,7 +342,7 @@ class Game {
     for (const cell of this.cells) {
       const shipDist = Math.hypot(cell.x - this.ship.x, cell.y - this.ship.y);
       const coreDist = Math.hypot(cell.x - VIEW.coreX, cell.y - VIEW.coreY);
-      if (this.ship.alive && shipDist < cell.radius + 20) {
+      if (this.ship.alive && shipDist < cell.radius + 20 * this.mods.magnet) {
         this.collectCell(cell);
       } else if (coreDist < VIEW.coreRadius + 5) {
         this.plasmaFed++;
@@ -344,7 +360,8 @@ class Game {
       if (this.comboTimer <= 0) this.combo = 0;
     }
 
-    // Wave flow.
+    // Wave flow: clearing a wave banks the bonus and opens the boon draft,
+    // the run's one decision point. Clearing the last wave is the dawn.
     if (this.phase === 'falling' && this.director.spawningDone && this.shards.length === 0) {
       if (this.director.wave >= this.director.totalWaves) {
         this.finishRun(true);
@@ -354,16 +371,37 @@ class Game {
       this.score += bonus;
       this.banner(`WAVE ${this.director.wave} CLEARED`, `+${bonus} bonus`, 2.4);
       this.particles.ring(VIEW.coreX, VIEW.coreY, '#5cff9d', 200, 3, 0.8);
-      this.phase = 'intermission';
-      this.interT = 2.4;
-    } else if (this.phase === 'intermission') {
-      this.interT -= dt;
-      if (this.interT <= 0) {
-        this.director.startWave(this.director.wave + 1);
-        this.banner(`WAVE ${this.director.wave}`, this.director.wave === this.director.totalWaves ? 'the last fall' : '', 2.2);
-        this.phase = 'falling';
+      this.draft = pickBoons(this.rng, this);
+      this.phase = 'draft';
+    }
+  }
+
+  // While the draft is open the world holds its breath: only the pick is
+  // read, by number key or by clicking a card.
+  updateDraft() {
+    let pick = -1;
+    if (this.input.justPressed('Digit1')) pick = 0;
+    if (this.input.justPressed('Digit2')) pick = 1;
+    if (this.input.justPressed('Digit3')) pick = 2;
+    if (pick < 0 && this.input.mouseClicked) {
+      for (let i = 0; i < this.draft.length; i++) {
+        const r = cardRect(i);
+        if (this.input.mouseX >= r.x && this.input.mouseX <= r.x + r.w
+          && this.input.mouseY >= r.y && this.input.mouseY <= r.y + r.h) {
+          pick = i;
+          break;
+        }
       }
     }
+    if (pick < 0 || pick >= this.draft.length) return;
+    const id = this.draft[pick];
+    BOONS[id].apply(this);
+    this.boonsTaken.push(id);
+    this.draft = [];
+    this.particles.text(this.ship.x, this.ship.y - 30, BOONS[id].name.toUpperCase(), '#ffd98a', 17);
+    this.director.startWave(this.director.wave + 1);
+    this.banner(`WAVE ${this.director.wave}`, this.director.wave === this.director.totalWaves ? 'the last fall' : '', 2.2);
+    this.phase = 'falling';
   }
 
   updateAmbient(dt) {

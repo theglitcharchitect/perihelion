@@ -1,6 +1,6 @@
 // The moving things: the guardian skiff, the falling shards in their six
 // kinds, pulse bolts and plasma cells. Factories and per-entity movement live
-// here; collisions and scoring live in main.js, drawing in render.js.
+// here; collisions and scoring live in game.js, drawing in render.js.
 
 import { BOLT, PALETTE, SHARD_KINDS, SHIP, VIEW } from './config.js';
 
@@ -13,6 +13,7 @@ export function makeShip(x, y) {
     vx: 0, vy: 0,
     angle: -Math.PI / 2, // the way the nose points (toward the aim)
     hull: SHIP.hull,
+    maxHull: SHIP.hull, // a boon can raise this; the HUD draws one pip each
     fireTimer: 0,
     invulnerable: 0,
     thrusting: false,
@@ -20,7 +21,7 @@ export function makeShip(x, y) {
   };
 }
 
-export function updateShip(ship, input, dt) {
+export function updateShip(ship, input, dt, mods) {
   let ax = 0;
   let ay = 0;
   if (input.down('KeyW', 'ArrowUp')) ay -= 1;
@@ -30,8 +31,9 @@ export function updateShip(ship, input, dt) {
   const length = Math.hypot(ax, ay);
   ship.thrusting = length > 0;
   if (length > 0) {
-    ax = (ax / length) * SHIP.thrust;
-    ay = (ay / length) * SHIP.thrust;
+    const thrust = SHIP.thrust * (mods ? mods.thrust : 1);
+    ax = (ax / length) * thrust;
+    ay = (ay / length) * thrust;
   }
 
   // The Heart pulls gently; near it, holding position is real work.
@@ -108,6 +110,7 @@ export function makeShard(kind, x, y, rng, speedScale) {
     age: 0,
     flash: 0, // white hit-flash timer, read by the renderer
     seed: rng.next(),
+    trail: [], // recent positions, drawn as the fall's curved path
   };
 }
 
@@ -132,6 +135,9 @@ export function updateShard(shard, dt) {
   shard.y += shard.vy * dt;
   shard.rotation += shard.spin * dt;
   shard.flash = Math.max(0, shard.flash - dt * 6);
+  // Remember the path so the renderer can draw the curve gravity bent.
+  shard.trail.push({ x: shard.x, y: shard.y });
+  if (shard.trail.length > 20) shard.trail.shift();
 }
 
 export function makeBolt(ship) {

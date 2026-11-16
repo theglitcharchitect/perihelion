@@ -1,1 +1,6 @@
-[{"name":"1-title.jpg","query":"?shot=title&seed=7"},{"name":"2-battle.jpg","query":"?shot=battle&seed=7"},{"name":"3-nova.jpg","query":"?shot=nova&seed=11"},{"name":"4-dawn.jpg","query":"?shot=dawn&seed=7"}]
+[
+  { "name": "1-title.jpg", "query": "?shot=title&seed=7" },
+  { "name": "2-battle.jpg", "query": "?shot=battle&seed=7" },
+  { "name": "3-nova.jpg", "query": "?shot=nova&seed=11" },
+  { "name": "4-extinguished.jpg", "query": "?shot=extinguished&seed=7" }
+]
